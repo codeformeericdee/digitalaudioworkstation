@@ -145,14 +145,20 @@ bool DrawApplicationWindowBackground()
 }
 
 #define APPLICATION_GLOBAL_SAMPLERATE 100
+#define SAMPLE_RATE 44100
+#define BUFFER_SECONDS 1
+#define WAVE_FREQUENCY 50
+#define CHANNEL_COUNT 1
+#define BUFFER_LENGTH (SAMPLE_RATE * BUFFER_SECONDS)
+#define BUFFER_SIZE 1
 
-bool DrawPluginOscilloscope(const char* label, float* yPoints, float* xPoints)
+bool DrawPluginOscilloscope(const char* label, float* yPoints, float* xPoints, const int nyquistLimit)
 {
     ImPlot::CreateContext();
     if (ImPlot::BeginPlot("Oscilloscope"))
     {
 
-        ImPlot::PlotLine(label, xPoints, yPoints, APPLICATION_GLOBAL_SAMPLERATE);
+        ImPlot::PlotLine(label, xPoints, yPoints, nyquistLimit);
         ImPlot::EndPlot();
     }
 
@@ -163,6 +169,8 @@ float VertexScale = 1.0f;
 float DynamicColor[4] = { 0.9f, 0.3f, 0.02f, 1.0f };
 #define APPLICATION_WINDOW_BACKGROUND_SCALE VertexScale
 #define APPLICATION_WINDOW_BACKGROUND_COLOR DynamicColor
+
+float Frequency = (float)WAVE_FREQUENCY;
 
 bool SetPluginOptions()
 {
@@ -176,7 +184,7 @@ bool SetPluginOptions()
 
 bool ApplicationShouldDrawBackground = false;
 #define APPLICATION_SHOULD_DRAW_BACKGROUND ApplicationShouldDrawBackground
-bool PluginShouldDrawBackground = false;
+bool PluginShouldDrawBackground = true;
 #define PLUGIN_SHOULD_DRAW_BACKGROUND PluginShouldDrawBackground
 
 bool ConfigureApplicationWindowFrame()
@@ -188,25 +196,26 @@ bool ConfigureApplicationWindowFrame()
     ImGui::NewFrame();
 
     ImGui::Begin("This is a plugin window.");
+    ImGui::SetWindowSize(ImVec2(632, 632));
     ImGui::Text("Welcome to a runtime!");
     ImGui::Checkbox("Oscilloscope.", &PLUGIN_SHOULD_DRAW_BACKGROUND);
-    ImGui::SliderFloat("OscScale", &VertexScale, 0.1f, 2.0f);
-    ImGui::ColorEdit4("OscColor", DynamicColor);
+    ImGui::SliderFloat("Frequency", &Frequency, 1, 1580);
     
-    float amplitudes[APPLICATION_GLOBAL_SAMPLERATE];
-    for (int n = 0; n < APPLICATION_GLOBAL_SAMPLERATE; n++)
-        amplitudes[n] = sinf(n * 0.2f + ImGui::GetTime() * 1.5f);
+    const int nyquistLimit = 1580 * 2;
+
+    float amplitudes[nyquistLimit];
+    for (int n = 0; n < nyquistLimit; n++)
+        amplitudes[n] = (float)sin(2 * M_PI * Frequency * n / nyquistLimit);
     
-    float samples[APPLICATION_GLOBAL_SAMPLERATE];
-    for (int n = 0; n < APPLICATION_GLOBAL_SAMPLERATE; n++)
+    float samples[nyquistLimit];
+    for (int n = 0; n < nyquistLimit; n++)
         samples[n] = n;
     
     const char* oscilloscopeLabel = "Realtime";
-    ImGui::PlotLines(oscilloscopeLabel, amplitudes, 100);
     
     if (PLUGIN_SHOULD_DRAW_BACKGROUND)
     {
-        DrawPluginOscilloscope(oscilloscopeLabel, amplitudes, samples);
+        DrawPluginOscilloscope(oscilloscopeLabel, amplitudes, samples, nyquistLimit);
     }
 
     ImGui::End();
@@ -244,61 +253,68 @@ bool ExitGLFW(GLFWwindow* window, int numberOfObjects = 1)
     return true;
 }
 
-#define SAMPLE_RATE 44100
-#define BUFFER_SECONDS 1
-#define WAVE_FREQUENCY 158
-#define CHANNEL_COUNT 1
-#define BUFFER_LENGTH (SAMPLE_RATE * BUFFER_SECONDS)
+ALshort monoSamples[BUFFER_LENGTH];
+ALshort stereoSamples[BUFFER_LENGTH * 2];
 
-int main()
+ALuint alBuffer[BUFFER_SIZE], alSource;
+
+ALCdevice* alDevice;
+ALCcontext* alContext;
+
+void GenerateWaveData()
 {
-    ALCdevice* device;
-    ALCcontext* context;
-
-    ALshort monoSamples[BUFFER_LENGTH];
-    ALshort stereoSamples[BUFFER_LENGTH * 2];
-    ALuint buffer[4], source;
-
-    device = alcOpenDevice(NULL);
-    context = alcCreateContext(device, NULL);
-    alcMakeContextCurrent(context);
-    
-    alGenSources(1, &source);
-    alGenBuffers(4, buffer);
-
     if (CHANNEL_COUNT == 1)
     {
         for (int i = 0; i < BUFFER_LENGTH; ++i) {
-            monoSamples[i * CHANNEL_COUNT] = sin(2 * M_PI * WAVE_FREQUENCY * i / BUFFER_LENGTH) * SHRT_MAX;
+            monoSamples[i * CHANNEL_COUNT] = sin(2 * M_PI * (short)Frequency * i / BUFFER_LENGTH) * SHRT_MAX;
         }
 
-        for (int b = 0; b < 4; b++)
+        for (int b = 0; b < BUFFER_SIZE; b++)
         {
-            alBufferData(buffer[b], AL_FORMAT_MONO16, monoSamples, sizeof(monoSamples), BUFFER_LENGTH * CHANNEL_COUNT);
-            alSourceQueueBuffers(source, 1, &buffer[b]);
+            alBufferData(alBuffer[b], AL_FORMAT_MONO16, monoSamples, sizeof(monoSamples), BUFFER_LENGTH * CHANNEL_COUNT);
+            alSourceQueueBuffers(alSource, 1, &alBuffer[b]);
         }
     }
 
     if (CHANNEL_COUNT == 2)
     {
         for (int i = 0; i < BUFFER_LENGTH; ++i) {
-            stereoSamples[i * CHANNEL_COUNT] = sin(2 * M_PI * WAVE_FREQUENCY * i / BUFFER_LENGTH / CHANNEL_COUNT) * SHRT_MAX;
-            stereoSamples[i * CHANNEL_COUNT + 1] = -1 * sin(2 * M_PI * WAVE_FREQUENCY * i / BUFFER_LENGTH / CHANNEL_COUNT) * SHRT_MAX;
+            stereoSamples[i * CHANNEL_COUNT] = sin(2 * M_PI * (short)Frequency * i / BUFFER_LENGTH / CHANNEL_COUNT) * SHRT_MAX;
+            stereoSamples[i * CHANNEL_COUNT + 1] = -1 * sin(2 * M_PI * Frequency * i / BUFFER_LENGTH / CHANNEL_COUNT) * SHRT_MAX;
         }
 
-        for (int b = 0; b < 4; b++)
+        for (int b = 0; b < BUFFER_SIZE; b++)
         {
-            alBufferData(buffer[b], AL_FORMAT_STEREO16, stereoSamples, sizeof(stereoSamples), BUFFER_LENGTH * CHANNEL_COUNT);
-            alSourceQueueBuffers(source, 1, &buffer[b]);
+            alBufferData(alBuffer[b], AL_FORMAT_STEREO16, stereoSamples, sizeof(stereoSamples), BUFFER_LENGTH * CHANNEL_COUNT);
+            alSourceQueueBuffers(alSource, 1, &alBuffer[b]);
         }
     }
+}
 
-    //alSourcei(source, AL_BUFFER, buffer);
-    //alSourcei(source, AL_LOOPING, AL_TRUE);
-    alSourcePlay(source);
+void ExitAL()
+{
+    alSourceStop(alSource);
+    alDeleteSources(1, &alSource);
+    alDeleteBuffers(1, alBuffer);
+    alcMakeContextCurrent(NULL);
+    alcDestroyContext(alContext);
+    alcCloseDevice(alDevice);
+}
 
-    ALint iBuffersProcessed = 0;
-    ALint iTotalBuffersProcessed = 0;
+ALint iBuffersProcessed = 0;
+ALint iTotalBuffersProcessed = 0;
+
+int main()
+{
+
+    alDevice = alcOpenDevice(NULL);
+    alContext = alcCreateContext(alDevice, NULL);
+    alcMakeContextCurrent(alContext);
+    
+    alGenSources(1, &alSource);
+    alGenBuffers(BUFFER_SIZE, alBuffer);
+
+    GenerateWaveData();
 
     printf("End of OpenAL configuration");
 
@@ -313,8 +329,10 @@ int main()
 
     if (OpenApplicationWindow(window))
     {
+
         if (ConfigureApplicationWindow())
         {
+
             ConfigureGLShaders();
             ConfigureApplicationWindowBuffer();
             ReframeApplicationWindow(window);
@@ -330,34 +348,43 @@ int main()
             glUseProgram(APPLICATION_WINDOW_GL_PROGRAM);
             SetPluginOptions();
 
+            /* al */
+            alSourcePlay(alSource);
+            /* al */
+
             while (!glfwWindowShouldClose(window))
             {
                 ConfigureApplicationWindowFrame();
                 ReframeApplicationWindow(window);
                 glfwPollEvents();
 
+                /* al */
+                alGetSourcei(alSource, AL_BUFFERS_PROCESSED, &iBuffersProcessed);
+
+                iTotalBuffersProcessed += iBuffersProcessed;
+
                 ALuint uiBufferRemoved = 0;
-                alSourceUnqueueBuffers(source, 1, &uiBufferRemoved);
+                alSourceUnqueueBuffers(alSource, 1, &uiBufferRemoved);
 
-                // Read more samples if there is a buffer found from the removal
-
-                alBufferData(uiBufferRemoved, AL_FORMAT_MONO16, monoSamples, sizeof(monoSamples), BUFFER_LENGTH* CHANNEL_COUNT);
-
-                // Send it back to the source queue for looping?
-
-                alBufferData(buffer[3], AL_FORMAT_MONO16, monoSamples, sizeof(monoSamples), BUFFER_LENGTH* CHANNEL_COUNT);
-                alSourceQueueBuffers(source, 1, &buffer[3]);
+                alBufferData(uiBufferRemoved, AL_FORMAT_MONO16, monoSamples, sizeof(monoSamples), BUFFER_LENGTH * CHANNEL_COUNT);
 
                 iBuffersProcessed--;
+
+                if (iTotalBuffersProcessed == BUFFER_SIZE)
+                {
+
+                    GenerateWaveData();
+
+                    alSourcePlay(alSource);
+
+                    iBuffersProcessed = 0;
+                    iTotalBuffersProcessed = 0;
+                }
+                /* al */
             }
         }
 
-        alSourceStop(source);
-        alDeleteSources(1, &source);
-        alDeleteBuffers(1, buffer);
-        alcMakeContextCurrent(NULL);
-        alcDestroyContext(context);
-        alcCloseDevice(device);
+        ExitAL();
         ExitGLFW(window);
 
         return 0;
