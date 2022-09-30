@@ -1,2 +1,4 @@
 .vs
 api.daw/x64/Debug/
+x64/Debug/*.exe
+x64/Debug/*.pdb
