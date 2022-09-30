@@ -215,6 +215,7 @@ bool ConfigureApplicationWindowFrame()
     
     if (PLUGIN_SHOULD_DRAW_BACKGROUND)
     {
+
         DrawPluginOscilloscope(oscilloscopeLabel, amplitudes, samples, nyquistLimit);
     }
 
@@ -224,6 +225,7 @@ bool ConfigureApplicationWindowFrame()
 
     if (APPLICATION_SHOULD_DRAW_BACKGROUND)
     {
+
         DrawApplicationWindowBackground();
     }
 
@@ -265,6 +267,7 @@ void GenerateWaveData()
 {
     if (CHANNEL_COUNT == 1)
     {
+
         for (int i = 0; i < BUFFER_LENGTH; ++i) {
             monoSamples[i * CHANNEL_COUNT] = sin(2 * M_PI * (short)Frequency * i / BUFFER_LENGTH) * SHRT_MAX;
         }
@@ -278,6 +281,7 @@ void GenerateWaveData()
 
     if (CHANNEL_COUNT == 2)
     {
+
         for (int i = 0; i < BUFFER_LENGTH; ++i) {
             stereoSamples[i * CHANNEL_COUNT] = sin(2 * M_PI * (short)Frequency * i / BUFFER_LENGTH / CHANNEL_COUNT) * SHRT_MAX;
             stereoSamples[i * CHANNEL_COUNT + 1] = -1 * sin(2 * M_PI * Frequency * i / BUFFER_LENGTH / CHANNEL_COUNT) * SHRT_MAX;
@@ -364,6 +368,7 @@ int main()
                 iTotalBuffersProcessed += iBuffersProcessed;
 
                 ALuint uiBufferRemoved = 0;
+                alGenBuffers(BUFFER_SIZE, &uiBufferRemoved);
                 alSourceUnqueueBuffers(alSource, 1, &uiBufferRemoved);
 
                 alBufferData(uiBufferRemoved, AL_FORMAT_MONO16, monoSamples, sizeof(monoSamples), BUFFER_LENGTH * CHANNEL_COUNT);
